@@ -1,7 +1,9 @@
 import io
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
+import yfinance as yf
 
 # 設定網頁版面
 st.set_page_config(
@@ -10,9 +12,10 @@ st.set_page_config(
 
 
 def main():
-  st.title("🚀 丹尼爾波段主流股盤中監控與篩選系統")
+  st.title("🚀 丹尼爾波段主流股盤中監控與互動圖表系統")
   st.markdown(
-      "本系統根據丹尼爾波段主流股戰法設計，支援上傳個股 Excel 清單，並依據技術面與籌碼條件進行自動化篩選與資金控管計算。"
+      "本系統根據丹尼爾波段主流股戰法設計，支援上傳個股 Excel 清單、自動化篩選、資金控管計算，以及個股互動式 K"
+      " 線圖與均線檢視。"
   )
 
   # 側邊欄：檔案上傳與參數設定
@@ -24,9 +27,6 @@ def main():
   st.sidebar.subheader("⚙️ 篩選條件設定")
   price_min = st.sidebar.number_input("推薦成交價下限", value=10.0, step=1.0)
   price_max = st.sidebar.number_input("推薦成交價上限", value=200.0, step=5.0)
-
-  enable_new_high = st.sidebar.checkbox("股價創 10 日新高", value=True)
-  enable_ma_tight = st.sidebar.checkbox("股價與 20MA / 60MA 糾結", value=False)
 
   st.sidebar.subheader("💰 資金控管設定")
   total_capital = st.sidebar.number_input(
@@ -51,10 +51,6 @@ def main():
         df = df.drop(0).reset_index(drop=True)
 
       st.success(f"成功載入資料！共計 {len(df)} 檔股票。")
-
-      # 顯示原始資料預覽
-      with st.expander("🔍 檢視原始資料預覽"):
-        st.dataframe(df.head(10))
 
       # 資料欄位處理與防錯
       numeric_cols = [
@@ -98,6 +94,103 @@ def main():
 
         st.dataframe(filtered_df, use_container_width=True)
 
+        # ---------------------------------------------------------
+        # 新增：個股 K 線圖互動區塊
+        # ---------------------------------------------------------
+        st.markdown("---")
+        st.subheader("📊 個股技術分析與 K 線圖 (搭配 20MA / 60MA / 120MA)")
+
+        # 抓取可用股票代號清單
+        ticker_col = (
+            "Ticker symbol"
+            if "Ticker symbol" in filtered_df.columns
+            else filtered_df.columns[3]
+        )
+        stock_list = filtered_df[ticker_col].dropna().astype(str).tolist()
+
+        if stock_list:
+          selected_stock = st.selectbox(
+              "選擇要檢視 K 線圖的股票代號", stock_list
+          )
+
+          if selected_stock:
+            # 轉換為 yfinance 格式 (台股加上 .TW)
+            yf_ticker = (
+                selected_stock + ".TW"
+                if not selected_stock.endswith((".TW", ".TWO"))
+                else selected_stock
+            )
+
+            with st.spinner(f"正在載入 {yf_ticker} 的歷史股價資料..."):
+              try:
+                hist = yf.download(yf_ticker, period="6mo", interval="1d")
+                if not hist.empty:
+                  # 處理 MultiIndex 欄位名稱（yfinance有時會回傳多層欄位）
+                  if isinstance(hist.columns, pd.MultiIndex):
+                    hist.columns = hist.columns.droplevel(1)
+
+                  # 計算均線
+                  hist["MA20"] = hist["Close"].rolling(window=20).mean()
+                  hist["MA60"] = hist["Close"].rolling(window=60).mean()
+                  hist["MA120"] = hist["Close"].rolling(window=120).mean()
+
+                  # 繪製 Plotly 圖表
+                  fig = go.Figure()
+
+                  # 1. K 線圖
+                  fig.add_trace(
+                      go.Candlestick(
+                          x=hist.index,
+                          open=hist["Open"],
+                          high=hist["High"],
+                          low=hist["Low"],
+                          close=hist["Close"],
+                          name="K線",
+                      )
+                  )
+
+                  # 2. 均線
+                  fig.add_trace(
+                      go.Scatter(
+                          x=hist.index,
+                          y=hist["MA20"],
+                          line=dict(color="orange", width=1.5),
+                          name="20MA (月線)",
+                      )
+                  )
+                  fig.add_trace(
+                      go.Scatter(
+                          x=hist.index,
+                          y=hist["MA60"],
+                          line=dict(color="blue", width=1.5),
+                          name="60MA (季線)",
+                      )
+                  )
+                  fig.add_trace(
+                      go.Scatter(
+                          x=hist.index,
+                          y=hist["MA120"],
+                          line=dict(color="purple", width=1.5),
+                          name="120MA (半年線)",
+                      )
+                  )
+
+                  fig.update_layout(
+                      title=f"{selected_stock} 日 K 線圖與均線走勢",
+                      yaxis_title="價格 (TWD)",
+                      xaxis_rangeslider_visible=False,
+                      height=600,
+                      template="plotly_white",
+                  )
+
+                  st.plotly_chart(fig, use_container_width=True)
+                else:
+                  st.warning(
+                      f"無法取得代號 {selected_stock} 的歷史資料，請確認代號是否正確。"
+                  )
+              except Exception as e:
+                st.error(f下載歷史股價時發生錯誤: {e})
+
         # 下載篩選後的 CSV
         csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
@@ -113,10 +206,9 @@ def main():
       st.error(f"讀取或處理檔案時發生錯誤: {e}")
   else:
     st.info(
-        "👈 請從左側側邊欄上傳您的股票清單 Excel 檔案（例如您剛才準備好的 Stocks_0914.xlsx）。"
+        "👈 請從左側側邊欄上傳您的股票清單 Excel 檔案（例如 Stocks_0914.xlsx）。"
     )
 
-    # 顯示戰法操作提醒
     st.markdown("### 📚 丹尼爾波段主流股操作口訣提醒")
     st.markdown(
         """
