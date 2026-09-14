@@ -8,13 +8,16 @@ st.set_page_config(page_title="個股技術分析與 K 線圖", layout="wide")
 
 st.title("📊 個股技術分析與 K 線圖 (搭配 20MA / 60MA / 120MA)")
 
-# 側邊欄：資料與策略設定
-st.sidebar.header("📁 資料與策略設定")
+# 側邊欄：檔案上傳與市場別設定
+st.sidebar.header("📁 資料設定")
 uploaded_file = st.sidebar.file_uploader("上傳股票清單 Excel 檔案", type=["xlsx", "csv"])
 
-# 預設股票代號清單
-stock_list = ["2305", "2330", "6226", "2317"]
+market_suffix = st.sidebar.selectbox("市場別預設", [".TW (上市)", ".TWO (上櫃)"], index=0)
+suffix = ".TW" if "TW (上市)" in market_suffix else ".TWO"
+
+# 讀取 Excel 檔案
 df_stocks = None
+default_code = "2330"
 
 if uploaded_file is not None:
     try:
@@ -22,42 +25,46 @@ if uploaded_file is not None:
             df_stocks = pd.read_csv(uploaded_file)
         else:
             df_stocks = pd.read_excel(uploaded_file)
-        
-        # 尋找可能包含股票代號的欄位
-        code_col = None
-        for col in df_stocks.columns:
-            if any(k in str(col).lower() for k in ['代號', 'code', '股票', 'stock']):
-                code_col = col
-                break
-        if code_col is None:
-            code_col = df_stocks.columns[0]
-            
-        # 清理並過濾掉 NaN 或空值
-        raw_list = df_stocks[code_col].dropna().astype(str).str.zfill(4).tolist()
-        stock_list = [s for s in raw_list if s.lower() != 'nan' and s.strip() != '']
-        if not stock_list:
-            stock_list = ["2305", "2330", "6226", "2317"]
     except Exception as e:
-        st.sidebar.error(f"讀取上傳檔案發生錯誤: {e}")
+        st.sidebar.error(f"讀取檔案發生錯誤: {e}")
 
-# 側邊欄：篩選條件與選股
-st.sidebar.header("⚙️ 篩選與設定")
-selected_code = st.sidebar.selectbox("選擇要檢視 K 線圖的股票代號", stock_list)
-
-market_suffix = st.sidebar.selectbox("市場別", [".TW (上市)", ".TWO (上櫃)"], index=0)
-suffix = ".TW" if "TW (上市)" in market_suffix else ".TWO"
-
-if selected_code is None or pd.isna(selected_code) or str(selected_code).lower() == 'nan':
-    selected_code = "2330"
-
-ticker_symbol = f"{str(selected_code).strip()}{suffix}"
-
-# 主畫面：使用左右分欄，右側（或下方主區域）顯示 Excel 清單與 K 線圖
-st.subheader("📋 上傳的股票清單內容")
+# 主畫面：顯示股票表格並支援點擊選股
 if df_stocks is not None:
-    st.dataframe(df_stocks, use_container_width=True)
+    # 自動尋找代號欄位
+    code_col = None
+    for col in df_stocks.columns:
+        if any(k in str(col).lower() for k in ['代號', 'code', '股票', 'stock']):
+            code_col = col
+            break
+    if code_col is None:
+        code_col = df_stocks.columns[0]
+        
+    st.subheader("📋 上傳的股票清單 (點選下方表格任一列即可顯示該股票 K 線圖)")
+    
+    # 啟用 Streamlit 內建表格單行選取功能
+    event = st.dataframe(
+        df_stocks, 
+        use_container_width=True, 
+        selection_mode="single-row", 
+        on_select="rerun",
+        key="stock_table"
+    )
+    
+    # 取得被點選的股票代號
+    selected_rows = event.selection.rows if hasattr(event, 'selection') else []
+    if selected_rows:
+        idx = selected_rows[0]
+        selected_code = str(df_stocks.iloc[idx][code_col]).strip()
+    else:
+        # 預設選取第一筆
+        selected_code = str(df_stocks.iloc[0][code_col]).strip()
 else:
-    st.info("請從左側上傳 Excel 股票清單檔案（如 Stocks_0914.xlsx）。")
+    st.info("請從左側上傳 Excel 股票清單檔案。")
+    selected_code = default_code
+
+# 處理股票代號格式
+selected_code = ''.join(filter(str.isdigit, selected_code)).zfill(4)
+ticker_symbol = f"{selected_code}{suffix}"
 
 st.divider()
 st.subheader(f"📈 {selected_code} 日 K 線圖與均線走勢")
@@ -77,12 +84,15 @@ try:
         if 'Close' not in df.columns:
             st.error(f"資料欄位異常，找不到 Close 欄位。現有欄位: {list(df.columns)}")
         else:
+            # 計算均線 (20MA, 60MA, 120MA)
             df['MA20'] = df['Close'].rolling(window=20).mean()
             df['MA60'] = df['Close'].rolling(window=60).mean()
             df['MA120'] = df['Close'].rolling(window=120).mean()
 
+            # 建立 Plotly 圖表
             fig = go.Figure()
 
+            # 加入 K 線圖 (設定紅漲綠跌)
             fig.add_trace(
                 go.Candlestick(
                     x=df.index,
@@ -91,20 +101,15 @@ try:
                     low=df['Low'],
                     close=df['Close'],
                     name='K線',
-                    increasing_line_color='red',
-                    decreasing_line_color='green'
+                    increasing_line_color='red',   # 上漲為紅色
+                    decreasing_line_color='green'  # 下跌為綠色
                 )
             )
 
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20MA (月線)'
-            ))
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df['MA60'], line=dict(color='blue', width=1.5), name='60MA (季線)'
-            ))
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df['MA120'], line=dict(color='purple', width=1.5), name='120MA (半年線)'
-            ))
+            # 加入均線
+            fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20MA (月線)'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='blue', width=1.5), name='60MA (季線)'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['MA120'], line=dict(color='purple', width=1.5), name='120MA (半年線)'))
 
             fig.update_layout(
                 xaxis_rangeslider_visible=False,
