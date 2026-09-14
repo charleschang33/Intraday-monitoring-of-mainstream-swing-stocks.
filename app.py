@@ -40,6 +40,14 @@ if uploaded_file is not None:
     except Exception as e:
         st.sidebar.error(f"讀取上傳檔案發生錯誤: {e}")
 
+# 側邊欄：篩選條件設定 (恢復你原本的成交價上下限與資金控管等選項)
+st.sidebar.header("⚙️ 篩選條件設定")
+price_min = st.sidebar.number_input("推薦成交價下限", value=10.00, step=1.0)
+price_max = st.sidebar.number_input("推薦成交價上限", value=200.00, step=5.0)
+
+st.sidebar.header("💰 資金控管設定")
+total_capital = st.sidebar.number_input("總資金 (元)", value=1000000, step=50000)
+
 # 選擇要檢視 K 線圖的股票代號
 selected_code = st.sidebar.selectbox("選擇要檢視 K 線圖的股票代號", stock_list)
 
