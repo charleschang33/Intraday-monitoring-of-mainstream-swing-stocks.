@@ -140,14 +140,16 @@ def main():
                   # 1. K 線圖
                   fig.add_trace(
                       go.Candlestick(
-                          x=hist.index,
-                          open=hist["Open"],
-                          high=hist["High"],
-                          low=hist["Low"],
-                          close=hist["Close"],
-                          name="K線",
-                      )
-                  )
+                          x=df.index,
+                          open=df['Open'],
+                          high=df['High'],
+                          low=df['Low'],
+                          close=df['Close'],
+                          name='K線',
+                          increasing_line_color='red',   # 上漲為紅色
+                          decreasing_line_color='green'  # 下跌為綠色
+                    )
+                 )
 
                   # 2. 均線
                   fig.add_trace(
