@@ -22,8 +22,8 @@ def main():
   )
 
   st.sidebar.subheader("⚙️ 篩選條件設定")
-  price_min = st.sidebar.number_input(推薦成交價下限, value=10.0, step=1.0)
-  price_max = st.sidebar.number_input(推薦成交價上限, value=200.0, step=5.0)
+  price_min = st.sidebar.number_input("推薦成交價下限", value=10.0, step=1.0)
+  price_max = st.sidebar.number_input("推薦成交價上限", value=200.0, step=5.0)
 
   enable_new_high = st.sidebar.checkbox("股價創 10 日新高", value=True)
   enable_ma_tight = st.sidebar.checkbox("股價與 20MA / 60MA 糾結", value=False)
@@ -39,14 +39,13 @@ def main():
   if uploaded_file is not None:
     try:
       # 讀取 Excel 檔案
-      # 支援多個分頁選擇
       xls = pd.ExcelFile(uploaded_file)
       sheet_name = st.sidebar.selectbox("選擇 Excel 分頁 (Sheet)", xls.sheet_names)
 
       # 讀取資料
       df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
 
-      # 針對表頭進行自動對齊清理 (相容不同的匯出格式)
+      # 針對表頭進行自動對齊清理
       if "Ticker symbol" not in df.columns and 0 in df.index:
         df.columns = df.iloc[0]
         df = df.drop(0).reset_index(drop=True)
@@ -58,8 +57,6 @@ def main():
         st.dataframe(df.head(10))
 
       # 資料欄位處理與防錯
-      # 假設欄位包含：Ticker symbol, Price, High, Low, Change (%), Volume, Industry 等
-      # 確保數值欄位為 float / int
       numeric_cols = [
           "Price",
           "High",
@@ -82,24 +79,20 @@ def main():
             & (filtered_df["Price"] <= price_max)
         ]
 
-      # 模擬 10 日新高條件 (若資料表有 High 及 High (10d) 或簡化以 High >= High (10wk) 等替代，此處提供介面與邏輯擴充點)
       st.markdown("---")
       st.subheader("🎯 篩選結果與資金控管對照表")
 
       if not filtered_df.empty:
         # 計算資金控管建議張數
-        # 假設停損價以當日低點或自訂估算 (示範：以 Low 作為停損參考價)
         if "Price" in filtered_df.columns and "Low" in filtered_df.columns:
-          filtered_df["假設停損價"] = filtered_df["Low"] * 0.98  # 範例估算
+          filtered_df["假設停損價"] = filtered_df["Low"] * 0.98
           filtered_df["每張風險金額"] = (
               filtered_df["Price"] - filtered_df["假設停損價"]
           ) * 1000
           max_loss_amount = total_capital * max_risk_pct
           filtered_df["建議買進張數"] = np.where(
               filtered_df["每張風險金額"] > 0,
-              np.floor(
-                  max_loss_amount / filtered_df["每張風險金額"]
-              ),  #[cite: 1]
+              np.floor(max_loss_amount / filtered_df["每張風險金額"]),
               0,
           )
 
@@ -120,17 +113,17 @@ def main():
       st.error(f"讀取或處理檔案時發生錯誤: {e}")
   else:
     st.info(
-        "👈 請從左側側邊欄上傳您的股票清單 Excel 檔案（例如包含價量、籌碼與技術指標的檔案）。"
+        "👈 請從左側側邊欄上傳您的股票清單 Excel 檔案（例如您剛才準備好的 Stocks_0914.xlsx）。"
     )
 
     # 顯示戰法操作提醒
     st.markdown("### 📚 丹尼爾波段主流股操作口訣提醒")
     st.markdown(
         """
-        1. **判斷大盤多空**：確認大盤／櫃買指數短線偏多時才積極進場[cite: 1]。
-        2. **選主流**：挑選族群強度高、法人籌碼青睞的強勢股[cite: 1]。
-        3. **進場點**：突破買（長紅突破平切線）或拉回買（突破隔天量縮拉回 10:30 走穩）[cite: 1]。
-        4. **資金控管**：單筆最大虧損嚴格控制在總資金的 1% ~ 2%[cite: 1]。
+        1. **判斷大盤多空**：確認大盤／櫃買指數短線偏多時才積極進場。
+        2. **選主流**：挑選族群強度高、法人籌碼青睞的強勢股。
+        3. **進場點**：突破買（長紅突破平切線）或拉回買（突破隔天量縮拉回 10:30 走穩）。
+        4. **資金控管**：單筆最大虧損嚴格控制在總資金的 1% ~ 2%。
         """
     )
 
