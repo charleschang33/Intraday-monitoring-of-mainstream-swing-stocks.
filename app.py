@@ -189,8 +189,8 @@ def main():
                       f"無法取得代號 {selected_stock} 的歷史資料，請確認代號是否正確。"
                   )
               except Exception as e:
-                st.error(f下載歷史股價時發生錯誤: {e})
-
+                st.error(f"下載歷史股價時發生錯誤: {e}")
+                  
         # 下載篩選後的 CSV
         csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
