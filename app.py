@@ -32,7 +32,11 @@ if uploaded_file is not None:
         if code_col is None:
             code_col = df_stocks.columns[0]
             
-        stock_list = df_stocks[code_col].astype(str).str.zfill(4).tolist()
+        # 清理並過濾掉 NaN 或空值
+        raw_list = df_stocks[code_col].dropna().astype(str).str.zfill(4).tolist()
+        stock_list = [s for s in raw_list if s.lower() != 'nan' and s.strip() != '']
+        if not stock_list:
+            stock_list = ["2305", "2330", "6226", "2317"]
     except Exception as e:
         st.sidebar.error(f"讀取上傳檔案發生錯誤: {e}")
 
@@ -43,7 +47,11 @@ selected_code = st.sidebar.selectbox("選擇要檢視 K 線圖的股票代號", 
 market_suffix = st.sidebar.selectbox("市場別", [".TW (上市)", ".TWO (上櫃)"], index=0)
 suffix = ".TW" if "TW (上市)" in market_suffix else ".TWO"
 
-ticker_symbol = f"{selected_code.strip()}{suffix}"
+# 防呆處理：確保 selected_code 有值且不是 nan
+if selected_code is None or pd.isna(selected_code) or str(selected_code).lower() == 'nan':
+    selected_code = "2330"
+
+ticker_symbol = f"{str(selected_code).strip()}{suffix}"
 
 st.subheader(f"📈 {selected_code} 日 K 線圖與均線走勢")
 
