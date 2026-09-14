@@ -1,226 +1,116 @@
-import io
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import pandas as pd
 import yfinance as yf
+import plotly.graph_objects as go
 
 # 設定網頁版面
-st.set_page_config(
-    page_title="丹尼爾波段主流股盤中監控系統", page_icon="📈", layout="wide"
-)
+st.set_page_config(page_title="個股技術分析與 K 線圖", layout="wide")
 
+st.title("📊 個股技術分析與 K 線圖 (搭配 20MA / 60MA / 120MA)")
 
-def main():
-  st.title("🚀 丹尼爾波段主流股盤中監控與互動圖表系統")
-  st.markdown(
-      "本系統根據丹尼爾波段主流股戰法設計，支援上傳個股 Excel 清單、自動化篩選、資金控管計算，以及個股互動式 K"
-      " 線圖與均線檢視。"
-  )
+# 側邊欄：資料與策略設定
+st.sidebar.header("📁 資料與策略設定")
+uploaded_file = st.sidebar.file_uploader("上傳股票清單 Excel 檔案", type=["xlsx", "csv"])
 
-  # 側邊欄：檔案上傳與參數設定
-  st.sidebar.header("📁 資料與策略設定")
-  uploaded_file = st.sidebar.file_uploader(
-      "上傳股票清單 Excel 檔案", type=["xlsx", "xls"]
-  )
+# 預設股票代號清單
+stock_list = ["2305", "2330", "6226", "2317"]
+df_stocks = None
 
-  st.sidebar.subheader("⚙️ 篩選條件設定")
-  price_min = st.sidebar.number_input("推薦成交價下限", value=10.0, step=1.0)
-  price_max = st.sidebar.number_input("推薦成交價上限", value=200.0, step=5.0)
-
-  st.sidebar.subheader("💰 資金控管設定")
-  total_capital = st.sidebar.number_input(
-      "總資金 (元)", value=1000000, step=100000
-  )
-  max_risk_pct = (
-      st.sidebar.slider("單筆最大虧損比例 (%)", 0.5, 3.0, 1.0, 0.5) / 100.0
-  )
-
-  if uploaded_file is not None:
+if uploaded_file is not None:
     try:
-      # 讀取 Excel 檔案
-      xls = pd.ExcelFile(uploaded_file)
-      sheet_name = st.sidebar.selectbox("選擇 Excel 分頁 (Sheet)", xls.sheet_names)
+        if uploaded_file.name.endswith('.csv'):
+            df_stocks = pd.read_csv(uploaded_file)
+        else:
+            df_stocks = pd.read_excel(uploaded_file)
+        
+        # 尋找可能包含股票代號的欄位
+        code_col = None
+        for col in df_stocks.columns:
+            if any(k in str(col).lower() for k in ['代號', 'code', '股票', 'stock']):
+                code_col = col
+                break
+        if code_col is None:
+            code_col = df_stocks.columns[0]
+            
+        stock_list = df_stocks[code_col].astype(str).str.zfill(4).tolist()
+    except Exception as e:
+        st.sidebar.error(f"讀取上傳檔案發生錯誤: {e}")
 
-      # 讀取資料
-      df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+# 選擇要檢視 K 線圖的股票代號
+selected_code = st.sidebar.selectbox("選擇要檢視 K 線圖的股票代號", stock_list)
 
-      # 針對表頭進行自動對齊清理
-      if "Ticker symbol" not in df.columns and 0 in df.index:
-        df.columns = df.iloc[0]
-        df = df.drop(0).reset_index(drop=True)
+# 加上台股代號後綴 (預設上市用 .TW，若無法抓取可自行切換)
+market_suffix = st.sidebar.selectbox("市場別", [".TW (上市)", ".TWO (上櫃)"], index=0)
+suffix = ".TW" if "TW (上市)" in market_suffix else ".TWO"
 
-      st.success(f"成功載入資料！共計 {len(df)} 檔股票。")
+ticker_symbol = f"{selected_code.strip()}{suffix}"
 
-      # 資料欄位處理與防錯
-      numeric_cols = [
-          "Price",
-          "High",
-          "Low",
-          "Change (%)",
-          "Volume",
-          "High (52wk)",
-          "Low (52wk)",
-      ]
-      for col in numeric_cols:
-        if col in df.columns:
-          df[col] = pd.to_numeric(df[col], errors="coerce")
+st.subheader(f"📈 {selected_code} 日 K 線圖與均線走勢")
 
-      # 執行篩選邏輯
-      filtered_df = df.copy()
+# 下載歷史股價資料並繪圖
+try:
+    # 下載近 1 年資料
+    df = yf.download(ticker_symbol, period="1Y")
+    
+    if df.empty:
+        st.error(f"找不到 {ticker_symbol} 的歷史股價資料，請檢查代號或市場別。")
+    else:
+        # 1. 處理 yfinance 可能產生的 MultiIndex 欄位
+        if hasattr(df.columns, 'levels') and len(df.columns.levels) > 1:
+            df.columns = df.columns.get_level_values(0)
+            
+        # 2. 將所有欄位名稱統一轉為首字大寫 (確保有 Open, High, Low, Close)
+        df.columns = [str(col).capitalize() for col in df.columns]
+        
+        if 'Close' not in df.columns:
+            st.error(f"資料欄位異常，找不到 Close 欄位。現有欄位: {list(df.columns)}")
+        else:
+            # 計算均線 (20MA, 60MA, 120MA)
+            df['MA20'] = df['Close'].rolling(window=20).mean()
+            df['MA60'] = df['Close'].rolling(window=60).mean()
+            df['MA120'] = df['Close'].rolling(window=120).mean()
 
-      if "Price" in filtered_df.columns:
-        filtered_df = filtered_df[
-            (filtered_df["Price"] >= price_min)
-            & (filtered_df["Price"] <= price_max)
-        ]
+            # 建立 Plotly 圖表
+            fig = go.Figure()
 
-      st.markdown("---")
-      st.subheader("🎯 篩選結果與資金控管對照表")
-
-      if not filtered_df.empty:
-        # 計算資金控管建議張數
-        if "Price" in filtered_df.columns and "Low" in filtered_df.columns:
-          filtered_df["假設停損價"] = filtered_df["Low"] * 0.98
-          filtered_df["每張風險金額"] = (
-              filtered_df["Price"] - filtered_df["假設停損價"]
-          ) * 1000
-          max_loss_amount = total_capital * max_risk_pct
-          filtered_df["建議買進張數"] = np.where(
-              filtered_df["每張風險金額"] > 0,
-              np.floor(max_loss_amount / filtered_df["每張風險金額"]),
-              0,
-          )
-
-        st.dataframe(filtered_df, use_container_width=True)
-
-        # ---------------------------------------------------------
-        # 新增：個股 K 線圖互動區塊
-        # ---------------------------------------------------------
-        st.markdown("---")
-        st.subheader("📊 個股技術分析與 K 線圖 (搭配 20MA / 60MA / 120MA)")
-
-        # 抓取可用股票代號清單
-        ticker_col = (
-            "Ticker symbol"
-            if "Ticker symbol" in filtered_df.columns
-            else filtered_df.columns[3]
-        )
-        stock_list = filtered_df[ticker_col].dropna().astype(str).tolist()
-
-        if stock_list:
-          selected_stock = st.selectbox(
-              "選擇要檢視 K 線圖的股票代號", stock_list
-          )
-
-          if selected_stock:
-            # 轉換為 yfinance 格式 (台股加上 .TW)
-            yf_ticker = (
-                selected_stock + ".TW"
-                if not selected_stock.endswith((".TW", ".TWO"))
-                else selected_stock
+            # 加入 K 線圖 (設定紅漲綠跌)
+            fig.add_trace(
+                go.Candlestick(
+                    x=df.index,
+                    open=df['Open'],
+                    high=df['High'],
+                    low=df['Low'],
+                    close=df['Close'],
+                    name='K線',
+                    increasing_line_color='red',   # 上漲為紅色
+                    decreasing_line_color='green'  # 下跌為綠色
+                )
             )
 
-            with st.spinner(f"正在載入 {yf_ticker} 的歷史股價資料..."):
-              try:
-                hist = yf.download(yf_ticker, period="6mo", interval="1d")
-                if not hist.empty:
-                  # 處理 MultiIndex 欄位名稱（yfinance有時會回傳多層欄位）
-                  if isinstance(hist.columns, pd.MultiIndex):
-                    hist.columns = hist.columns.droplevel(1)
+            # 加入 20MA (月線)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20MA (月線)'
+            ))
 
-                  # 計算均線
-                  hist["MA20"] = hist["Close"].rolling(window=20).mean()
-                  hist["MA60"] = hist["Close"].rolling(window=60).mean()
-                  hist["MA120"] = hist["Close"].rolling(window=120).mean()
+            # 加入 60MA (季線)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df['MA60'], line=dict(color='blue', width=1.5), name='60MA (季線)'
+            ))
 
-                  # 繪製 Plotly 圖表
-                  fig = go.Figure()
+            # 加入 120MA (半年線)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df['MA120'], line=dict(color='purple', width=1.5), name='120MA (半年線)'
+            ))
 
-                  # 1. K 線圖
-                  fig.add_trace(
-                      go.Candlestick(
-                          x=df.index,
-                          open=df['Open'],
-                          high=df['High'],
-                          low=df['Low'],
-                          close=df['Close'],
-                          name='K線',
-                          increasing_line_color='red',   # 上漲為紅色
-                          decreasing_line_color='green'  # 下跌為綠色
-                    )
-                 )
+            # 圖表排版設定
+            fig.update_layout(
+                xaxis_rangeslider_visible=False,
+                height=600,
+                margin=dict(l=20, r=20, t=30, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
 
-                  # 2. 均線
-                  fig.add_trace(
-                      go.Scatter(
-                          x=hist.index,
-                          y=hist["MA20"],
-                          line=dict(color="orange", width=1.5),
-                          name="20MA (月線)",
-                      )
-                  )
-                  fig.add_trace(
-                      go.Scatter(
-                          x=hist.index,
-                          y=hist["MA60"],
-                          line=dict(color="blue", width=1.5),
-                          name="60MA (季線)",
-                      )
-                  )
-                  fig.add_trace(
-                      go.Scatter(
-                          x=hist.index,
-                          y=hist["MA120"],
-                          line=dict(color="purple", width=1.5),
-                          name="120MA (半年線)",
-                      )
-                  )
+            st.plotly_chart(fig, use_container_width=True)
 
-                  fig.update_layout(
-                      title=f"{selected_stock} 日 K 線圖與均線走勢",
-                      yaxis_title="價格 (TWD)",
-                      xaxis_rangeslider_visible=False,
-                      height=600,
-                      template="plotly_white",
-                  )
-
-                  st.plotly_chart(fig, use_container_width=True)
-                else:
-                  st.warning(
-                      f"無法取得代號 {selected_stock} 的歷史資料，請確認代號是否正確。"
-                  )
-              except Exception as e:
-                st.error(f"下載歷史股價時發生錯誤: {e}")
-                  
-        # 下載篩選後的 CSV
-        csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            label="📥 下載篩選後清單 (CSV)",
-            data=csv,
-            file_name="filtered_stocks.csv",
-            mime="text/csv",
-        )
-      else:
-        st.warning("沒有符合目前篩選條件的股票，請調整側邊欄的篩選參數。")
-
-    except Exception as e:
-      st.error(f"讀取或處理檔案時發生錯誤: {e}")
-  else:
-    st.info(
-        "👈 請從左側側邊欄上傳您的股票清單 Excel 檔案（例如 Stocks_0914.xlsx）。"
-    )
-
-    st.markdown("### 📚 丹尼爾波段主流股操作口訣提醒")
-    st.markdown(
-        """
-        1. **判斷大盤多空**：確認大盤／櫃買指數短線偏多時才積極進場。
-        2. **選主流**：挑選族群強度高、法人籌碼青睞的強勢股。
-        3. **進場點**：突破買（長紅突破平切線）或拉回買（突破隔天量縮拉回 10:30 走穩）。
-        4. **資金控管**：單筆最大虧損嚴格控制在總資金的 1% ~ 2%。
-        """
-    )
-
-
-if __name__ == "__main__":
-  main()
+except Exception as e:
+    st.error(f"下載歷史股價時發生錯誤: {e}")
