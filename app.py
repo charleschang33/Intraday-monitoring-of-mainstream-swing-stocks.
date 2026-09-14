@@ -30,14 +30,24 @@ if uploaded_file is not None:
 
 # 主畫面：顯示股票表格並支援點擊選股
 if df_stocks is not None:
-    # 自動尋找代號欄位
+    # 自動尋找最像股票代號的欄位 (優先找含有 4~6 位數數字的欄位)
     code_col = None
     for col in df_stocks.columns:
-        if any(k in str(col).lower() for k in ['代號', 'code', '股票', 'stock']):
+        if any(k in str(col).lower() for k in ['代號', 'code', '股票', 'stock', 'ticker']):
             code_col = col
             break
+            
     if code_col is None:
-        code_col = df_stocks.columns[0]
+        # 自動掃描每一欄，找出含有最多 4~6 位數字的欄位作為代號欄
+        best_col = df_stocks.columns[0]
+        max_valid_count = -1
+        for col in df_stocks.columns:
+            s_cleaned = df_stocks[col].dropna().astype(str).str.strip()
+            valid_count = s_cleaned.str.match(r'^\d{4,6}$').sum()
+            if valid_count > max_valid_count:
+                max_valid_count = valid_count
+                best_col = col
+        code_col = best_col
         
     st.subheader("📋 上傳的股票清單 (點選下方表格任一列即可顯示該股票 K 線圖)")
     
@@ -56,14 +66,14 @@ if df_stocks is not None:
         idx = selected_rows[0]
         selected_code = str(df_stocks.iloc[idx][code_col]).strip()
     else:
-        # 預設選取第一筆
+        # 預選第一筆
         selected_code = str(df_stocks.iloc[0][code_col]).strip()
 else:
     st.info("請從左側上傳 Excel 股票清單檔案。")
     selected_code = default_code
 
-# 處理股票代號格式
-selected_code = ''.join(filter(str.isdigit, selected_code)).zfill(4)
+# 確保抓取到乾淨的數字代號
+selected_code = ''.join(filter(str.isdigit, str(selected_code))).zfill(4)
 ticker_symbol = f"{selected_code}{suffix}"
 
 st.divider()
