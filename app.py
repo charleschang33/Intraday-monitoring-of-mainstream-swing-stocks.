@@ -40,56 +40,49 @@ if uploaded_file is not None:
     except Exception as e:
         st.sidebar.error(f"讀取上傳檔案發生錯誤: {e}")
 
-# 側邊欄：篩選條件設定 (恢復你原本的成交價上下限與資金控管等選項)
-st.sidebar.header("⚙️ 篩選條件設定")
-price_min = st.sidebar.number_input("推薦成交價下限", value=10.00, step=1.0)
-price_max = st.sidebar.number_input("推薦成交價上限", value=200.00, step=5.0)
-
-st.sidebar.header("💰 資金控管設定")
-total_capital = st.sidebar.number_input("總資金 (元)", value=1000000, step=50000)
-
-# 選擇要檢視 K 線圖的股票代號
+# 側邊欄：篩選條件與選股
+st.sidebar.header("⚙️ 篩選與設定")
 selected_code = st.sidebar.selectbox("選擇要檢視 K 線圖的股票代號", stock_list)
 
-# 加上台股代號後綴 (預設上市用 .TW，若無法抓取可自行切換)
 market_suffix = st.sidebar.selectbox("市場別", [".TW (上市)", ".TWO (上櫃)"], index=0)
 suffix = ".TW" if "TW (上市)" in market_suffix else ".TWO"
 
-# 防呆處理：確保 selected_code 有值且不是 nan
 if selected_code is None or pd.isna(selected_code) or str(selected_code).lower() == 'nan':
     selected_code = "2330"
 
 ticker_symbol = f"{str(selected_code).strip()}{suffix}"
 
+# 主畫面：使用左右分欄，右側（或下方主區域）顯示 Excel 清單與 K 線圖
+st.subheader("📋 上傳的股票清單內容")
+if df_stocks is not None:
+    st.dataframe(df_stocks, use_container_width=True)
+else:
+    st.info("請從左側上傳 Excel 股票清單檔案（如 Stocks_0914.xlsx）。")
+
+st.divider()
 st.subheader(f"📈 {selected_code} 日 K 線圖與均線走勢")
 
 # 下載歷史股價資料並繪圖
 try:
-    # 下載近 1 年資料
     df = yf.download(ticker_symbol, period="1Y")
     
     if df.empty:
         st.error(f"找不到 {ticker_symbol} 的歷史股價資料，請檢查代號或市場別。")
     else:
-        # 1. 處理 yfinance 可能產生的 MultiIndex 欄位
         if hasattr(df.columns, 'levels') and len(df.columns.levels) > 1:
             df.columns = df.columns.get_level_values(0)
             
-        # 2. 將所有欄位名稱統一轉為首字大寫 (確保有 Open, High, Low, Close)
         df.columns = [str(col).capitalize() for col in df.columns]
         
         if 'Close' not in df.columns:
             st.error(f"資料欄位異常，找不到 Close 欄位。現有欄位: {list(df.columns)}")
         else:
-            # 計算均線 (20MA, 60MA, 120MA)
             df['MA20'] = df['Close'].rolling(window=20).mean()
             df['MA60'] = df['Close'].rolling(window=60).mean()
             df['MA120'] = df['Close'].rolling(window=120).mean()
 
-            # 建立 Plotly 圖表
             fig = go.Figure()
 
-            # 加入 K 線圖 (設定紅漲綠跌)
             fig.add_trace(
                 go.Candlestick(
                     x=df.index,
@@ -98,27 +91,21 @@ try:
                     low=df['Low'],
                     close=df['Close'],
                     name='K線',
-                    increasing_line_color='red',   # 上漲為紅色
-                    decreasing_line_color='green'  # 下跌為綠色
+                    increasing_line_color='red',
+                    decreasing_line_color='green'
                 )
             )
 
-            # 加入 20MA (月線)
             fig.add_trace(go.Scatter(
                 x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20MA (月線)'
             ))
-
-            # 加入 60MA (季線)
             fig.add_trace(go.Scatter(
                 x=df.index, y=df['MA60'], line=dict(color='blue', width=1.5), name='60MA (季線)'
             ))
-
-            # 加入 120MA (半年線)
             fig.add_trace(go.Scatter(
                 x=df.index, y=df['MA120'], line=dict(color='purple', width=1.5), name='120MA (半年線)'
             ))
 
-            # 圖表排版設定
             fig.update_layout(
                 xaxis_rangeslider_visible=False,
                 height=600,
